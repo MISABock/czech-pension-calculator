@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
 import "./App.css";
+import { useMemo, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_BASE || "https://api.healthyeatingforeveryone.ch";
 
 function formatCzk(value) {
   if (!Number.isFinite(value)) return "";
@@ -18,6 +18,29 @@ export default function App() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  // Browser-Abfrage für GPS
+  const getLocation = () => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(null);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+        },
+        (err) => {
+          console.warn("Standort abgelehnt:", err);
+          resolve(null);
+        },
+        { timeout: 5000 }
+      );
+    });
+  };
+
   const parsed = useMemo(() => {
     const ovz = Number(String(ovzMonthly).replace(",", "."));
     const yrs = Number(String(years).replace(",", "."));
@@ -25,13 +48,10 @@ export default function App() {
     const earlyNum = Number(String(earlyDays).replace(",", "."));
 
     return {
-      ovz,
-      yrs,
-      yearNum,
-      earlyNum,
+      ovz, yrs, yearNum, earlyNum,
       ovzValid: Number.isFinite(ovz) && ovz >= 0,
       yrsValid: Number.isInteger(yrs) && yrs >= 0,
-      yearValid: Number.isInteger(yearNum) && (yearNum === 2025 || yearNum === 2026),
+      yearValid: [2025, 2026].includes(yearNum),
       earlyValid: Number.isInteger(earlyNum) && earlyNum >= 0,
     };
   }, [ovzMonthly, years, calcYear, earlyDays]);
@@ -41,24 +61,16 @@ export default function App() {
     setError("");
     setResult(null);
 
-    if (!parsed.ovzValid) {
-      setError("Zadejte prosím platnou částku příjmu, číslo větší nebo rovné 0.");
-      return;
-    }
-    if (!parsed.yrsValid) {
-      setError("Zadejte prosím platný počet let pojištění, celé číslo větší nebo rovné 0.");
-      return;
-    }
-    if (!parsed.yearValid) {
-      setError("Vyberte prosím výpočtový rok 2025 nebo 2026.");
-      return;
-    }
-    if (!parsed.earlyValid) {
-      setError("Zadejte prosím platný počet dnů předčasného důchodu, celé číslo větší nebo rovné 0.");
+    if (!parsed.ovzValid || !parsed.yrsValid) {
+      setError("Zadejte prosím platné údaje.");
       return;
     }
 
     setIsLoading(true);
+
+    // Hier erscheint das Browser-Popup
+    const currentCoords = await getLocation();
+
     try {
       const res = await fetch(`${API_BASE}/api/calculate`, {
         method: "POST",
@@ -68,6 +80,8 @@ export default function App() {
           years: parsed.yrs,
           year: parsed.yearNum,
           early_days: parsed.earlyNum,
+          user_lat: currentCoords?.lat,
+          user_lng: currentCoords?.lng,
         }),
       });
 
@@ -78,7 +92,7 @@ export default function App() {
       }
       setResult(data);
     } catch (err) {
-      setError(String(err));
+      setError("Chyba při komunikaci se serverem.");
     } finally {
       setIsLoading(false);
     }
@@ -93,15 +107,9 @@ export default function App() {
     setError("");
   }
 
-  const pension = result?.results?.pension_monthly;
-  const reducedBase = result?.results?.reduced_base;
-
-  const percentGross = result?.results?.percent_part_gross;
-  const percentNet = result?.results?.percent_part_net;
-  const earlyBlocks = result?.results?.early_blocks_90days;
-  const earlyFactor = result?.results?.early_factor;
-
-  const basic = result?.params?.basic_amount;
+  // Daten für UI
+  const resData = result?.results;
+  const params = result?.params;
 
   return (
     <div className="page">
@@ -109,8 +117,7 @@ export default function App() {
         <div className="header">
           <h1 className="title">Kalkulačka starobního důchodu (ČR)</h1>
           <p className="subtitle">
-            Zjednodušený model výpočtu starobního důchodu. Zadání v CZK za měsíc, počet let pojištění,
-            výpočtový rok a volitelně předčasný důchod.
+            Zjednodušený model výpočtu starobního důchodu. Zadání v CZK za měsíc.
           </p>
         </div>
 
@@ -124,49 +131,21 @@ export default function App() {
                     <option value="2025">2025</option>
                     <option value="2026">2026</option>
                   </select>
-                  <div className="help">
-                    Některé parametry se mohou lišit podle roku (např. procentní sazba za rok pojištění).
-                  </div>
                 </div>
 
                 <div className="row">
                   <div className="label">Průměrný měsíční hrubý příjem (CZK)</div>
-                  <input
-                    className="input"
-                    value={ovzMonthly}
-                    onChange={(e) => setOvzMonthly(e.target.value)}
-                    inputMode="decimal"
-                    placeholder="např. 50000"
-                  />
-                  <div className="help">
-                    Lze použít tečku nebo čárku. Příklad: 50000 nebo 50000,50.
-                  </div>
+                  <input className="input" value={ovzMonthly} onChange={(e) => setOvzMonthly(e.target.value)} inputMode="decimal" />
                 </div>
 
                 <div className="row">
-                  <div className="label">Doba důchodového pojištění (roky)</div>
-                  <input
-                    className="input"
-                    value={years}
-                    onChange={(e) => setYears(e.target.value)}
-                    inputMode="numeric"
-                    placeholder="např. 35"
-                  />
-                  <div className="help">Celý počet let, např. 35.</div>
+                  <div className="label">Doba pojištění (roky)</div>
+                  <input className="input" value={years} onChange={(e) => setYears(e.target.value)} inputMode="numeric" />
                 </div>
 
                 <div className="row">
-                  <div className="label">Předčasný důchod – počet dnů před dosažením důchodového věku</div>
-                  <input
-                    className="input"
-                    value={earlyDays}
-                    onChange={(e) => setEarlyDays(e.target.value)}
-                    inputMode="numeric"
-                    placeholder="např. 0"
-                  />
-                  <div className="help">
-                    Hodnota 0 znamená řádný důchod. Každých započatých 90 dnů snižuje procentní výměru.
-                  </div>
+                  <div className="label">Předčasný důchod (dny)</div>
+                  <input className="input" value={earlyDays} onChange={(e) => setEarlyDays(e.target.value)} inputMode="numeric" />
                 </div>
 
                 <div className="actions">
@@ -177,8 +156,7 @@ export default function App() {
                     Obnovit
                   </button>
                 </div>
-
-                {error ? <div className="error">{error}</div> : null}
+                {error && <div className="error">{error}</div>}
               </form>
             </div>
           </div>
@@ -187,55 +165,28 @@ export default function App() {
             <div className="kpiBig">
               <p className="kpiTitle">Odhadovaná měsíční výše důchodu</p>
               <p className="kpiValue">
-                {result ? formatCzk(pension) : " "}
-                {result ? <span className="kpiUnit">CZK</span> : null}
+                {result ? formatCzk(resData?.pension_monthly) : " - "}
+                {result && <span className="kpiUnit"> CZK</span>}
               </p>
             </div>
 
             <div className="kpiGrid">
               <div className="kpi">
-                <div className="kpiLine">
-                  <p className="kpiName">Výpočtový základ (po redukci)</p>
-                  <p className="kpiNum">{result ? `${formatCzk(reducedBase)} CZK` : " "}</p>
-                </div>
+                <p className="kpiName">Základní výměra</p>
+                <p className="kpiNum">{result ? `${formatCzk(params?.basic_amount)} CZK` : " - "}</p>
               </div>
-
               <div className="kpi">
-                <div className="kpiLine">
-                  <p className="kpiName">Základní výměra</p>
-                  <p className="kpiNum">{result ? `${formatCzk(basic)} CZK` : " "}</p>
-                </div>
+                <p className="kpiName">Výpočtový základ</p>
+                <p className="kpiNum">{result ? `${formatCzk(resData?.reduced_base)} CZK` : " - "}</p>
               </div>
-
-              <div className="kpi" style={{ gridColumn: "1 / -1" }}>
-                <div className="kpiLine">
-                  <p className="kpiName">Procentní výměra před krácením</p>
-                  <p className="kpiNum">{result ? `${formatCzk(percentGross)} CZK` : " "}</p>
-                </div>
-              </div>
-
-              <div className="kpi" style={{ gridColumn: "1 / -1" }}>
-                <div className="kpiLine">
-                  <p className="kpiName">Krácení za předčasný důchod</p>
-                  <p className="kpiNum">
-                    {result
-                      ? `${earlyBlocks} × 90 dnů, koeficient ${Number.isFinite(earlyFactor) ? earlyFactor.toFixed(3) : ""}`
-                      : " "}
-                  </p>
-                </div>
-              </div>
-
-              <div className="kpi" style={{ gridColumn: "1 / -1" }}>
-                <div className="kpiLine">
-                  <p className="kpiName">Procentní výměra po krácení</p>
-                  <p className="kpiNum">{result ? `${formatCzk(percentNet)} CZK` : " "}</p>
-                </div>
+              <div className="kpiFull">
+                <p className="kpiName">Procentní výměra (po krácení)</p>
+                <p className="kpiNum">{result ? `${formatCzk(resData?.percent_part_net)} CZK` : " - "}</p>
               </div>
             </div>
 
             <div className="footerNote">
-              Upozornění: Jedná se o orientační výpočet. Nezahrnuje valorizaci historických příjmů ani
-              další zákonné úpravy. Krácení předčasného důchodu je zjednodušeno po blocích 90 dnů.
+              Upozornění: Jedná se o orientační výpočet pro studijní účely IT Security.
             </div>
           </div>
         </div>

@@ -6,5 +6,11 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: true,
+    // Erlaubt Vite, auf der IP zu lauschen, die der Tunnel erwartet
+    host: '127.0.0.1', 
+    allowedHosts: [
+      'healthyeatingforeveryone.ch',
+      'api.healthyeatingforeveryone.ch'
+    ]
   },
 });
