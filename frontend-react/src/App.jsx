@@ -1,5 +1,5 @@
 import "./App.css";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://api.healthyeatingforeveryone.ch";
 
@@ -18,28 +18,20 @@ export default function App() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Browser-Abfrage für GPS
-  const getLocation = () => {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) {
-        resolve(null);
-        return;
+  useEffect(() => {
+    const loadGeo = async () => {
+      try {
+        const res = await fetch("/api/geoip");
+        const data = await res.json();
+        setGeo(data);
+      } catch (e) {
+        console.error("GeoIP auto load fehlgeschlagen", e);
       }
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          resolve({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          });
-        },
-        (err) => {
-          console.warn("Standort abgelehnt:", err);
-          resolve(null);
-        },
-        { timeout: 5000 }
-      );
-    });
-  };
+    };
+
+    loadGeo();
+  }, []);
+
 
   const parsed = useMemo(() => {
     const ovz = Number(String(ovzMonthly).replace(",", "."));
@@ -68,35 +60,29 @@ export default function App() {
 
     setIsLoading(true);
 
-    // Hier erscheint das Browser-Popup
-    const currentCoords = await getLocation();
-
     try {
-      const res = await fetch(`${API_BASE}/api/calculate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ovz_monthly: parsed.ovz,
-          years: parsed.yrs,
-          year: parsed.yearNum,
-          early_days: parsed.earlyNum,
-          user_lat: currentCoords?.lat,
-          user_lng: currentCoords?.lng,
-        }),
-      });
+        // KEIN navigator.geolocation mehr -> KEIN Popup!
+        const res = await fetch(`${API_BASE}/api/calculate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ovz_monthly: parsed.ovz,
+            years: parsed.yrs,
+            year: parsed.yearNum,
+            early_days: parsed.earlyNum,
+            // Wir senden keine Koordinaten, das Backend macht das still über die IP
+          }),
+        });
 
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data?.error || "Neznámá chyba.");
-        return;
-      }
-      setResult(data);
-    } catch (err) {
-      setError("Chyba při komunikaci se serverem.");
-    } finally {
-      setIsLoading(false);
-    }
-  }
+        const data = await res.json();
+            if (!res.ok) throw new Error(data?.error || "Neznámá chyba.");
+            setResult(data);
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setIsLoading(false);
+          }
+        }
 
   function onReset() {
     setOvzMonthly("50000");
